@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import Head from "next/head";
-import * as XLSX from "xlsx";
+
 
 const C = {
   azul: "#1A5276", azul2: "#2E86C1", verde: "#00C6A0",
@@ -29,203 +29,25 @@ function totales(list, tipo) {
   );
 }
 
-// ══ ESTILO CELDA XLSX ══
-function estilo(bg, color="000000", bold=false, align="center", border=true) {
-  const b = { style:"thin", color:{rgb:"AAAAAA"} };
-  return {
-    fill: { fgColor: { rgb: bg } },
-    font: { bold, color: { rgb: color }, name: "Arial", sz: 10 },
-    alignment: { horizontal: align, vertical: "center", wrapText: true },
-    border: border ? { top:b, bottom:b, left:b, right:b } : {},
-  };
-}
-
-function exportarExcel(facturas, tipo, nombreArchivo) {
-  const wb = XLSX.utils.book_new();
-
-  // ── Hoja de facturas ──
-  const headers = ["N°","FECHA","TIMBRADO","N° FACTURA","RUC","RAZÓN SOCIAL","DESCRIPCIÓN","EXENTO (Gs)","GRAVADO 5%","IVA 5%","GRAVADO 10%","IVA 10%","TOTAL (Gs)"];
-  const lista = tipo === "TODOS" ? facturas : facturas.filter(f => f.tipo === tipo);
-  const compras = facturas.filter(f => f.tipo === "COMPRA");
-  const ventas  = facturas.filter(f => f.tipo === "VENTA");
-  const totC = totales(facturas, "COMPRA");
-  const totV = totales(facturas, "VENTA");
-
-  function crearHojaFacturas(datos, titulo, bgHeader) {
-    const wsData = [];
-
-    // Título
-    wsData.push([titulo + " — ContaIA Paraguay | Normativa DNIT 2026"]);
-    wsData.push([]);
-
-    // Headers
-    wsData.push(headers);
-
-    // Datos
-    datos.forEach((f, i) => {
-      wsData.push([
-        i+1, f.fecha, f.timbrado, f.numero, f.ruc, f.razonSocial, f.descripcion,
-        n(f.exento), n(f.gravado5), n(f.iva5), n(f.gravado10), n(f.iva10), n(f.total)
-      ]);
+// ══ EXPORTAR VÍA API SERVIDOR (Excel profesional con colores) ══
+async function exportarExcel(facturas, tipo, nombre) {
+  try {
+    const res = await fetch("/api/exportar-excel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ facturas, tipo }),
     });
-
-    // Total
-    const tot = datos.reduce((a,f) => ({
-      exento: a.exento+n(f.exento), gravado5: a.gravado5+n(f.gravado5),
-      iva5: a.iva5+n(f.iva5), gravado10: a.gravado10+n(f.gravado10),
-      iva10: a.iva10+n(f.iva10), total: a.total+n(f.total)
-    }), {exento:0,gravado5:0,iva5:0,gravado10:0,iva10:0,total:0});
-
-    wsData.push(["","","","","","","TOTAL DEL PERÍODO",
-      Math.round(tot.exento), Math.round(tot.gravado5), Math.round(tot.iva5),
-      Math.round(tot.gravado10), Math.round(tot.iva10), Math.round(tot.total)
-    ]);
-
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-    // Anchos de columna
-    ws["!cols"] = [
-      {wch:5},{wch:12},{wch:13},{wch:18},{wch:15},{wch:28},{wch:22},
-      {wch:14},{wch:14},{wch:12},{wch:14},{wch:12},{wch:16}
-    ];
-
-    // Merge título
-    ws["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:12} }];
-
-    // Estilos fila título
-    ws["A1"].s = estilo("1A5276","FFFFFF",true,"center",false);
-
-    // Estilos headers (fila 3)
-    headers.forEach((_, i) => {
-      const cell = XLSX.utils.encode_cell({r:2, c:i});
-      if (ws[cell]) ws[cell].s = estilo(bgHeader,"FFFFFF",true,"center");
-    });
-
-    // Estilos datos
-    wsData.slice(3, wsData.length-1).forEach((row, ri) => {
-      const bg = ri % 2 === 0 ? "EBF5FB" : "FFFFFF";
-      row.forEach((_, ci) => {
-        const cell = XLSX.utils.encode_cell({r:ri+3, c:ci});
-        if (ws[cell]) {
-          ws[cell].s = estilo(bg, "000000", false, ci >= 7 ? "right" : "left");
-          if (ci >= 7) ws[cell].z = '#,##0';
-        }
-      });
-    });
-
-    // Estilo fila total
-    const totRow = wsData.length - 1;
-    headers.forEach((_, ci) => {
-      const cell = XLSX.utils.encode_cell({r:totRow+2, c:ci});
-      if (ws[cell]) {
-        ws[cell].s = estilo("2E86C1","FFFFFF",true, ci >= 7 ? "right" : "center");
-        if (ci >= 7) ws[cell].z = '#,##0';
-      }
-    });
-
-    return ws;
+    if (!res.ok) throw new Error("Error del servidor");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${nombre}_ContaIA_Paraguay.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("Error al generar el Excel. Intentá de nuevo.");
   }
-
-  // ── Libro C/V ──
-  function crearLibroCVHoja() {
-    const wsData = [
-      ["📚 LIBRO COMPRA / VENTA — ContaIA Paraguay | Normativa DNIT 2026"],
-      [],
-      ["CONCEPTO","EXENTO (Gs)","GRAVADO 5%","IVA 5%","GRAVADO 10%","IVA 10%","TOTAL (Gs)"],
-      ["TOTAL COMPRAS", Math.round(totC.exento), Math.round(totC.gravado5), Math.round(totC.iva5), Math.round(totC.gravado10), Math.round(totC.iva10), Math.round(totC.total)],
-      ["TOTAL VENTAS",  Math.round(totV.exento), Math.round(totV.gravado5), Math.round(totV.iva5), Math.round(totV.gravado10), Math.round(totV.iva10), Math.round(totV.total)],
-      [],
-      ["IVA VENTAS (DÉBITO FISCAL)","","",Math.round(totV.iva5),"",Math.round(totV.iva10),Math.round(totV.iva5+totV.iva10)],
-      ["IVA COMPRAS (CRÉDITO FISCAL)","","",Math.round(totC.iva5),"",Math.round(totC.iva10),Math.round(totC.iva5+totC.iva10)],
-      ["✅ SALDO IVA (DÉBITO - CRÉDITO)","","",Math.round(totV.iva5-totC.iva5),"",Math.round(totV.iva10-totC.iva10),Math.round((totV.iva5+totV.iva10)-(totC.iva5+totC.iva10))],
-      [],
-      ["✅ Normativa DNIT 2026 | RG N° 90/2021 | Formulario 120 V4 | www.dnit.gov.py"],
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws["!cols"] = [{wch:35},{wch:16},{wch:16},{wch:14},{wch:16},{wch:14},{wch:16}];
-    ws["!merges"] = [
-      { s:{r:0,c:0}, e:{r:0,c:6} },
-      { s:{r:10,c:0}, e:{r:10,c:6} },
-    ];
-    if (ws["A1"]) ws["A1"].s = estilo("1A5276","FFFFFF",true,"center",false);
-    ["A","B","C","D","E","F","G"].forEach((col,i) => {
-      const cell = col+"3";
-      if (ws[cell]) ws[cell].s = estilo("2E86C1","FFFFFF",true,"center");
-    });
-    if (ws["A4"]) ws["A4"].s = estilo("D6EAF8","000000",true,"left");
-    if (ws["A5"]) ws["A5"].s = estilo("D5F5E7","000000",true,"left");
-    if (ws["A9"]) ws["A9"].s = estilo("D5F5E7","000000",true,"left");
-    return ws;
-  }
-
-  // ── Form 120 ──
-  function crearForm120Hoja() {
-    const sal5  = totV.iva5  - totC.iva5;
-    const sal10 = totV.iva10 - totC.iva10;
-    const salT  = sal5 + sal10;
-
-    const wsData = [
-      ["📋 FORMULARIO 120 — IVA | DNIT Paraguay | ContaIA Paraguay"],
-      ["Normativa: RG N° 90/2021 | Formulario 120 V4"],
-      [],
-      ["COD","CONCEPTO","IVA 5% (Gs)","IVA 10% (Gs)","TOTAL IVA (Gs)"],
-      ["","I. DÉBITO FISCAL (VENTAS)","","",""],
-      ["101","IVA ventas tasa 5%", Math.round(totV.iva5), 0, Math.round(totV.iva5)],
-      ["102","IVA ventas tasa 10%", 0, Math.round(totV.iva10), Math.round(totV.iva10)],
-      ["","Subtotal Débito Fiscal", Math.round(totV.iva5), Math.round(totV.iva10), Math.round(totV.iva5+totV.iva10)],
-      ["","II. CRÉDITO FISCAL (COMPRAS)","","",""],
-      ["201","IVA compras tasa 5%", Math.round(totC.iva5), 0, Math.round(totC.iva5)],
-      ["202","IVA compras tasa 10%", 0, Math.round(totC.iva10), Math.round(totC.iva10)],
-      ["","Subtotal Crédito Fiscal", Math.round(totC.iva5), Math.round(totC.iva10), Math.round(totC.iva5+totC.iva10)],
-      ["","III. SALDO DEL PERÍODO","","",""],
-      ["301","Saldo IVA a pagar", Math.round(sal5>0?sal5:0), Math.round(sal10>0?sal10:0), Math.round(salT>0?salT:0)],
-      ["302","Saldo a favor contribuyente", Math.round(sal5<0?Math.abs(sal5):0), Math.round(sal10<0?Math.abs(sal10):0), Math.round(salT<0?Math.abs(salT):0)],
-      ["","✅ TOTAL IVA A PAGAR AL FISCO","","", Math.round(salT>0?salT:0)],
-      [],
-      ["","⚠️ Verificá los datos antes de imputar en el Marangatu","","",""],
-      ["","✅ Normativa DNIT 2026 | RG N° 90/2021 | Formulario 120 V4 | www.dnit.gov.py","","",""],
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws["!cols"] = [{wch:8},{wch:38},{wch:16},{wch:16},{wch:16}];
-    ws["!merges"] = [
-      { s:{r:0,c:0}, e:{r:0,c:4} },
-      { s:{r:1,c:0}, e:{r:1,c:4} },
-    ];
-    if (ws["A1"]) ws["A1"].s = estilo("1A5276","FFFFFF",true,"center",false);
-    if (ws["A2"]) ws["A2"].s = estilo("2E86C1","FFFFFF",false,"center",false);
-    ["A","B","C","D","E"].forEach(col => {
-      if (ws[col+"4"]) ws[col+"4"].s = estilo("2E86C1","FFFFFF",true,"center");
-    });
-    // Secciones
-    ["A5","B5","C5","D5","E5"].forEach(c => { if(ws[c]) ws[c].s = estilo("2E86C1","FFFFFF",true,"left"); });
-    ["A9","B9","C9","D9","E9"].forEach(c => { if(ws[c]) ws[c].s = estilo("1A8A5A","FFFFFF",true,"left"); });
-    ["A13","B13","C13","D13","E13"].forEach(c => { if(ws[c]) ws[c].s = estilo("F39C12","000000",true,"left"); });
-    ["A8","B8","C8","D8","E8"].forEach(c => { if(ws[c]) ws[c].s = estilo("D6EAF8","000000",true,c==="A8"?"left":"right"); });
-    ["A12","B12","C12","D12","E12"].forEach(c => { if(ws[c]) ws[c].s = estilo("D5F5E7","000000",true,c==="A12"?"left":"right"); });
-    ["A16","B16","C16","D16","E16"].forEach(c => { if(ws[c]) ws[c].s = estilo("FEF9E7","000000",true,c==="A16"?"left":"right"); });
-    return ws;
-  }
-
-  // Agregar hojas según tipo
-  if (tipo === "COMPRA" || tipo === "TODOS") {
-    const ws = crearHojaFacturas(compras, "📥 LIBRO DE COMPRAS", "1A5276");
-    XLSX.utils.book_append_sheet(wb, ws, "COMPRAS");
-  }
-  if (tipo === "VENTA" || tipo === "TODOS") {
-    const ws = crearHojaFacturas(ventas, "📤 LIBRO DE VENTAS", "1A8A5A");
-    XLSX.utils.book_append_sheet(wb, ws, "VENTAS");
-  }
-  if (tipo === "TODOS") {
-    XLSX.utils.book_append_sheet(wb, crearLibroCVHoja(), "LIBRO C-V");
-    XLSX.utils.book_append_sheet(wb, crearForm120Hoja(), "FORMULARIO 120");
-  }
-  if (tipo === "FORM120") {
-    XLSX.utils.book_append_sheet(wb, crearForm120Hoja(), "FORMULARIO 120");
-  }
-
-  XLSX.writeFile(wb, `${nombreArchivo}_ContaIA_Paraguay.xlsx`);
 }
 
 const card = (extra) => ({
