@@ -16,6 +16,7 @@ const initF = {
 
 const n = (v) => parseFloat(v) || 0;
 const fmt = (v) => "Gs. " + Math.round(v).toLocaleString("es-PY");
+const fmtN = (v) => Math.round(n(v)).toString();
 
 function totales(list, tipo) {
   return list.filter(f => f.tipo === tipo).reduce(
@@ -29,6 +30,73 @@ function totales(list, tipo) {
     }),
     { exento:0,gravado5:0,iva5:0,gravado10:0,iva10:0,total:0 }
   );
+}
+
+// ══ EXPORTAR A CSV (abre en Excel) ══
+function exportarCSV(datos, nombre) {
+  const headers = ["TIPO","FECHA","TIMBRADO","N° FACTURA","RUC","RAZON SOCIAL","DESCRIPCION","EXENTO","GRAVADO 5%","IVA 5%","GRAVADO 10%","IVA 10%","TOTAL"];
+  const filas = datos.map(f => [
+    f.tipo, f.fecha, f.timbrado, f.numero, f.ruc, f.razonSocial, f.descripcion,
+    fmtN(f.exento), fmtN(f.gravado5), fmtN(f.iva5),
+    fmtN(f.gravado10), fmtN(f.iva10), fmtN(f.total)
+  ]);
+
+  // Totales
+  const tot = datos.reduce((a,f) => ({
+    exento: a.exento+n(f.exento), gravado5: a.gravado5+n(f.gravado5),
+    iva5: a.iva5+n(f.iva5), gravado10: a.gravado10+n(f.gravado10),
+    iva10: a.iva10+n(f.iva10), total: a.total+n(f.total)
+  }), {exento:0,gravado5:0,iva5:0,gravado10:0,iva10:0,total:0});
+
+  filas.push(["","","","","","","TOTALES",
+    Math.round(tot.exento), Math.round(tot.gravado5), Math.round(tot.iva5),
+    Math.round(tot.gravado10), Math.round(tot.iva10), Math.round(tot.total)
+  ]);
+
+  const csvContent = "\uFEFF" + [headers, ...filas]
+    .map(row => row.map(v => `"${v}"`).join(";"))
+    .join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${nombre}_ContaIA_Paraguay.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportarForm120CSV(totC, totV, sal5, sal10, salT) {
+  const rows = [
+    ["COD","CONCEPTO","IVA 5% (Gs)","IVA 10% (Gs)","TOTAL (Gs)"],
+    ["","I. DEBITO FISCAL (VENTAS)","","",""],
+    ["101","IVA ventas tasa 5%",Math.round(totV.iva5),0,Math.round(totV.iva5)],
+    ["102","IVA ventas tasa 10%",0,Math.round(totV.iva10),Math.round(totV.iva10)],
+    ["","Subtotal Debito Fiscal",Math.round(totV.iva5),Math.round(totV.iva10),Math.round(totV.iva5+totV.iva10)],
+    ["","II. CREDITO FISCAL (COMPRAS)","","",""],
+    ["201","IVA compras tasa 5%",Math.round(totC.iva5),0,Math.round(totC.iva5)],
+    ["202","IVA compras tasa 10%",0,Math.round(totC.iva10),Math.round(totC.iva10)],
+    ["","Subtotal Credito Fiscal",Math.round(totC.iva5),Math.round(totC.iva10),Math.round(totC.iva5+totC.iva10)],
+    ["","III. SALDO DEL PERIODO","","",""],
+    ["301","Saldo IVA a pagar",Math.round(sal5>0?sal5:0),Math.round(sal10>0?sal10:0),Math.round(salT>0?salT:0)],
+    ["302","Saldo a favor",Math.round(sal5<0?Math.abs(sal5):0),Math.round(sal10<0?Math.abs(sal10):0),Math.round(salT<0?Math.abs(salT):0)],
+    ["","TOTAL IVA A PAGAR AL FISCO","","",Math.round(salT>0?salT:0)],
+    ["","","","",""],
+    ["","Normativa DNIT 2026 | RG N 90/2021 | Formulario 120 V4","","",""],
+    ["","ContaIA Paraguay | www.dnit.gov.py","","",""],
+  ];
+
+  const csvContent = "\uFEFF" + rows
+    .map(row => row.map(v => `"${v}"`).join(";"))
+    .join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "Formulario120_ContaIA_Paraguay.csv";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 const card = (extra) => ({
@@ -47,6 +115,19 @@ const lbl = {
   textTransform: "uppercase", letterSpacing: 1,
   marginBottom: 4, display: "block",
 };
+
+function BtnExport({ onClick, label, color }) {
+  return (
+    <button onClick={onClick} style={{
+      background: color || C.verde, color: "#000",
+      border: "none", borderRadius: 10, padding: "10px 18px",
+      fontWeight: 700, fontSize: 13, cursor: "pointer",
+      display: "flex", alignItems: "center", gap: 6,
+    }}>
+      📥 {label}
+    </button>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState("scanner");
@@ -223,9 +304,7 @@ tipo: "COMPRA" si recibimos del proveedor, "VENTA" si emitimos al cliente.
           {/* ══ SCANNER ══ */}
           {tab === "scanner" && (
             <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
-
               {!editando && <>
-                {/* Drop zone */}
                 <div style={card()}>
                   <div onClick={() => fileRef.current.click()} style={{
                     border:`2px dashed ${C.azul2}`,borderRadius:14,padding:"44px 24px",
@@ -236,18 +315,13 @@ tipo: "COMPRA" si recibimos del proveedor, "VENTA" si emitimos al cliente.
                     <div style={{ color:C.gray,fontSize:14,marginBottom:18 }}>
                       Foto JPG/PNG o PDF — la IA extrae todos los datos automáticamente
                     </div>
-                    <button style={{
-                      background:C.azul2,color:C.white,border:"none",borderRadius:10,
-                      padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer",
-                    }}>
+                    <button style={{ background:C.azul2,color:C.white,border:"none",borderRadius:10,padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer" }}>
                       Seleccionar archivo
                     </button>
-                    <input ref={fileRef} type="file" accept="image/*,application/pdf"
-                      style={{ display:"none" }} onChange={onFile} />
+                    <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={onFile} />
                   </div>
                 </div>
 
-                {/* Manual */}
                 <div style={{ ...card(), display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12 }}>
                   <div>
                     <div style={{ fontWeight:700,marginBottom:4 }}>✏️ Carga manual</div>
@@ -265,7 +339,6 @@ tipo: "COMPRA" si recibimos del proveedor, "VENTA" si emitimos al cliente.
                 </div>
               </>}
 
-              {/* Loading */}
               {loading && (
                 <div style={card()}>
                   <div style={{ display:"flex",alignItems:"center",gap:12,color:C.verde }}>
@@ -279,7 +352,6 @@ tipo: "COMPRA" si recibimos del proveedor, "VENTA" si emitimos al cliente.
               {error && <div style={{ background:"#2D0A0A",border:`1px solid ${C.red}`,borderRadius:10,padding:14,color:"#FF8A80",fontSize:14 }}>⚠️ {error}</div>}
               {success && !editando && <div style={{ background:"#0A2D1A",border:`1px solid ${C.verde}`,borderRadius:10,padding:14,color:C.verde,fontSize:14 }}>{success}</div>}
 
-              {/* FORMULARIO */}
               {editando && (
                 <div style={card()}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10 }}>
@@ -364,6 +436,14 @@ tipo: "COMPRA" si recibimos del proveedor, "VENTA" si emitimos al cliente.
                       <div style={{ fontWeight:800,fontSize:18,color:col }}>{v}</div>
                     </div>
                   ))}
+                </div>
+
+                {/* BOTONES EXPORTAR */}
+                <div style={{ ...card(), display:"flex",gap:10,flexWrap:"wrap",alignItems:"center" }}>
+                  <div style={{ fontWeight:700,fontSize:14,marginRight:8 }}>📥 Exportar a Excel:</div>
+                  <BtnExport onClick={()=>exportarCSV(compras,"Libro_Compras")} label="Libro Compras" color={C.azul2} />
+                  <BtnExport onClick={()=>exportarCSV(ventas,"Libro_Ventas")} label="Libro Ventas" color={C.verdeDark} />
+                  <BtnExport onClick={()=>exportarCSV(facturas,"Libro_CV_Completo")} label="Libro C/V Completo" color={C.yellow} />
                 </div>
 
                 {/* Tabla compras */}
@@ -451,71 +531,76 @@ tipo: "COMPRA" si recibimos del proveedor, "VENTA" si emitimos al cliente.
 
           {/* ══ FORMULARIO 120 ══ */}
           {tab === "form120" && (
-            <div style={card()}>
-              <div style={{ fontWeight:800,fontSize:18,marginBottom:4 }}>📋 Resumen Formulario 120 — DNIT Paraguay</div>
-              <div style={{ color:C.gray,fontSize:13,marginBottom:20 }}>Normativa: RG N° 90/2021 | Formulario 120 V4 | IVA</div>
-
-              {/* Columnas header */}
-              <div style={{ display:"grid",gridTemplateColumns:"50px 1fr 160px 160px 160px",gap:8,padding:"6px 12px",marginBottom:4 }}>
-                {["","","IVA 5%","IVA 10%","TOTAL"].map((h,i)=>(
-                  <div key={i} style={{ textAlign:i>1?"right":"left",color:C.gray,fontSize:11,fontWeight:700 }}>{h}</div>
-                ))}
-              </div>
-
-              {[
-                { header:true, label:"I. DÉBITO FISCAL (VENTAS)", color:C.azul2 },
-                { cod:"101", label:"IVA ventas tasa 5%", v5:deb5, v10:0 },
-                { cod:"102", label:"IVA ventas tasa 10%", v5:0, v10:deb10 },
-                { sub:true, label:"Subtotal Débito Fiscal", v5:deb5, v10:deb10 },
-                { header:true, label:"II. CRÉDITO FISCAL (COMPRAS)", color:C.verdeDark },
-                { cod:"201", label:"IVA compras tasa 5%", v5:cred5, v10:0 },
-                { cod:"202", label:"IVA compras tasa 10%", v5:0, v10:cred10 },
-                { sub:true, label:"Subtotal Crédito Fiscal", v5:cred5, v10:cred10 },
-                { header:true, label:"III. SALDO DEL PERÍODO", color:C.yellow },
-                { cod:"301", label:"Saldo IVA a pagar", v5:sal5>0?sal5:0, v10:sal10>0?sal10:0 },
-                { cod:"302", label:"Saldo a favor", v5:sal5<0?Math.abs(sal5):0, v10:sal10<0?Math.abs(sal10):0 },
-              ].map((row,i) => {
-                if (row.header) return (
-                  <div key={i} style={{ background:row.color,borderRadius:8,padding:"10px 14px",fontWeight:800,fontSize:13,color:C.white,marginBottom:4,marginTop:i>0?10:0 }}>
-                    {row.label}
+            <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+              <div style={card()}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:20 }}>
+                  <div>
+                    <div style={{ fontWeight:800,fontSize:18,marginBottom:4 }}>📋 Resumen Formulario 120 — DNIT Paraguay</div>
+                    <div style={{ color:C.gray,fontSize:13 }}>Normativa: RG N° 90/2021 | Formulario 120 V4 | IVA</div>
                   </div>
-                );
-                const tot = (row.v5||0)+(row.v10||0);
-                return (
-                  <div key={i} style={{
-                    display:"grid",gridTemplateColumns:"50px 1fr 160px 160px 160px",gap:8,
-                    alignItems:"center",padding:"8px 12px",
-                    background:row.sub?C.bgLight:"transparent",
-                    borderRadius:row.sub?8:0,marginBottom:4,
-                    borderBottom:`1px solid ${C.grayLight}`,
-                  }}>
-                    <span style={{ color:C.azul2,fontWeight:700,fontSize:12 }}>{row.cod||""}</span>
-                    <span style={{ fontSize:13,fontWeight:row.sub?700:400 }}>{row.label}</span>
-                    <span style={{ textAlign:"right",fontSize:13,color:C.verde }}>{fmt(row.v5||0)}</span>
-                    <span style={{ textAlign:"right",fontSize:13,color:C.verde }}>{fmt(row.v10||0)}</span>
-                    <span style={{ textAlign:"right",fontSize:13,fontWeight:700,color:row.sub?C.yellow:C.white }}>{fmt(tot)}</span>
-                  </div>
-                );
-              })}
-
-              {/* Total final */}
-              <div style={{
-                background:salT>0?"#2D1A00":"#0A2D1A",
-                border:`2px solid ${salT>0?C.yellow:C.verde}`,
-                borderRadius:12,padding:18,marginTop:16,
-                display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,
-              }}>
-                <div>
-                  <div style={{ fontWeight:800,fontSize:16 }}>{salT>0?"⚠️ IVA A PAGAR AL FISCO":"✅ SALDO A FAVOR DEL CONTRIBUYENTE"}</div>
-                  <div style={{ color:C.gray,fontSize:12 }}>Imputar en el Sistema Marangatu</div>
+                  <BtnExport onClick={()=>exportarForm120CSV(totC,totV,sal5,sal10,salT)} label="Exportar Formulario 120" color={C.azul2} />
                 </div>
-                <div style={{ fontWeight:900,fontSize:26,color:salT>0?C.yellow:C.verde }}>{fmt(Math.abs(salT))}</div>
-              </div>
 
-              <div style={{ marginTop:14,padding:12,background:C.bgLight,borderRadius:8,color:C.gray,fontSize:11,lineHeight:1.8 }}>
-                ⚠️ Verificá siempre los datos antes de imputar en el Marangatu.<br/>
-                📌 Base imponible: precio con IVA incluido / 1.05 (tasa 5%) o / 1.10 (tasa 10%)<br/>
-                ✅ Normativa DNIT 2026 | RG N° 90/2021 | Formulario 120 V4 | www.dnit.gov.py
+                <div style={{ display:"grid",gridTemplateColumns:"50px 1fr 160px 160px 160px",gap:8,padding:"6px 12px",marginBottom:4 }}>
+                  {["","","IVA 5%","IVA 10%","TOTAL"].map((h,i)=>(
+                    <div key={i} style={{ textAlign:i>1?"right":"left",color:C.gray,fontSize:11,fontWeight:700 }}>{h}</div>
+                  ))}
+                </div>
+
+                {[
+                  { header:true, label:"I. DÉBITO FISCAL (VENTAS)", color:C.azul2 },
+                  { cod:"101", label:"IVA ventas tasa 5%", v5:deb5, v10:0 },
+                  { cod:"102", label:"IVA ventas tasa 10%", v5:0, v10:deb10 },
+                  { sub:true, label:"Subtotal Débito Fiscal", v5:deb5, v10:deb10 },
+                  { header:true, label:"II. CRÉDITO FISCAL (COMPRAS)", color:C.verdeDark },
+                  { cod:"201", label:"IVA compras tasa 5%", v5:cred5, v10:0 },
+                  { cod:"202", label:"IVA compras tasa 10%", v5:0, v10:cred10 },
+                  { sub:true, label:"Subtotal Crédito Fiscal", v5:cred5, v10:cred10 },
+                  { header:true, label:"III. SALDO DEL PERÍODO", color:C.yellow },
+                  { cod:"301", label:"Saldo IVA a pagar", v5:sal5>0?sal5:0, v10:sal10>0?sal10:0 },
+                  { cod:"302", label:"Saldo a favor", v5:sal5<0?Math.abs(sal5):0, v10:sal10<0?Math.abs(sal10):0 },
+                ].map((row,i) => {
+                  if (row.header) return (
+                    <div key={i} style={{ background:row.color,borderRadius:8,padding:"10px 14px",fontWeight:800,fontSize:13,color:C.white,marginBottom:4,marginTop:i>0?10:0 }}>
+                      {row.label}
+                    </div>
+                  );
+                  const tot = (row.v5||0)+(row.v10||0);
+                  return (
+                    <div key={i} style={{
+                      display:"grid",gridTemplateColumns:"50px 1fr 160px 160px 160px",gap:8,
+                      alignItems:"center",padding:"8px 12px",
+                      background:row.sub?C.bgLight:"transparent",
+                      borderRadius:row.sub?8:0,marginBottom:4,
+                      borderBottom:`1px solid ${C.grayLight}`,
+                    }}>
+                      <span style={{ color:C.azul2,fontWeight:700,fontSize:12 }}>{row.cod||""}</span>
+                      <span style={{ fontSize:13,fontWeight:row.sub?700:400 }}>{row.label}</span>
+                      <span style={{ textAlign:"right",fontSize:13,color:C.verde }}>{fmt(row.v5||0)}</span>
+                      <span style={{ textAlign:"right",fontSize:13,color:C.verde }}>{fmt(row.v10||0)}</span>
+                      <span style={{ textAlign:"right",fontSize:13,fontWeight:700,color:row.sub?C.yellow:C.white }}>{fmt(tot)}</span>
+                    </div>
+                  );
+                })}
+
+                <div style={{
+                  background:salT>0?"#2D1A00":"#0A2D1A",
+                  border:`2px solid ${salT>0?C.yellow:C.verde}`,
+                  borderRadius:12,padding:18,marginTop:16,
+                  display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,
+                }}>
+                  <div>
+                    <div style={{ fontWeight:800,fontSize:16 }}>{salT>0?"⚠️ IVA A PAGAR AL FISCO":"✅ SALDO A FAVOR DEL CONTRIBUYENTE"}</div>
+                    <div style={{ color:C.gray,fontSize:12 }}>Imputar en el Sistema Marangatu</div>
+                  </div>
+                  <div style={{ fontWeight:900,fontSize:26,color:salT>0?C.yellow:C.verde }}>{fmt(Math.abs(salT))}</div>
+                </div>
+
+                <div style={{ marginTop:14,padding:12,background:C.bgLight,borderRadius:8,color:C.gray,fontSize:11,lineHeight:1.8 }}>
+                  ⚠️ Verificá siempre los datos antes de imputar en el Marangatu.<br/>
+                  📌 Base imponible: precio con IVA incluido / 1.05 (tasa 5%) o / 1.10 (tasa 10%)<br/>
+                  ✅ Normativa DNIT 2026 | RG N° 90/2021 | Formulario 120 V4 | www.dnit.gov.py
+                </div>
               </div>
             </div>
           )}
