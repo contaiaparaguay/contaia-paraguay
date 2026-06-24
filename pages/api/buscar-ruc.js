@@ -4,42 +4,59 @@ export default async function handler(req, res) {
   const { ruc } = req.query;
   if (!ruc) return res.status(400).json({ error: "RUC requerido" });
 
-  try {
-    // Intentar con turuc.com.py
-    const resp = await fetch(`https://turuc.com.py/api/contribuyente/${ruc}`, {
-      headers: { "Accept": "application/json", "User-Agent": "ContaIA-Paraguay/2.0" },
-      signal: AbortSignal.timeout(5000),
-    });
+  const rucLimpio = ruc.replace(/\D/g, "").trim();
 
-    if (resp.ok) {
+  // Intentar múltiples fuentes
+  const fuentes = [
+    // TuRuc — búsqueda por número exacto
+    `https://turuc.com.py/api/contribuyente/${rucLimpio}`,
+    // TuRuc — búsqueda general (fallback)
+    `https://turuc.com.py/api/contribuyente/search?q=${rucLimpio}`,
+    // Siscotic — alternativa
+    `https://ruc.siscotic.com.py/api/contribuyente/${rucLimpio}`,
+  ];
+
+  for (const url of fuentes) {
+    try {
+      const resp = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "ContaIA-Paraguay/2.0",
+          "Origin": "https://ubiquitous-horse-15d3a9.netlify.app",
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (!resp.ok) continue;
+
       const data = await resp.json();
+
+      // Puede ser objeto directo o array (search endpoint devuelve array)
+      const item = Array.isArray(data) ? data[0] : data;
+      if (!item) continue;
+
+      // Intentar distintos campos de nombre según la fuente
+      const nombre = item.razonSocial || item.nombreFantasia || item.nombre ||
+                     item.razon_social || item.name || item.denominacion || "";
+
+      if (!nombre) continue;
+
       return res.status(200).json({
-        ruc: data.ruc || ruc,
-        nombre: data.razonSocial || data.nombreFantasia || data.nombre || "",
-        estado: data.estado || "DESCONOCIDO",
-        fuente: "turuc"
+        ruc: item.ruc || rucLimpio,
+        nombre: nombre.toUpperCase().trim(),
+        estado: item.estado || item.status || "ACTIVO",
+        fuente: url.includes("siscotic") ? "siscotic" : "turuc",
       });
+
+    } catch (e) {
+      // Seguir con la siguiente fuente
+      continue;
     }
-
-    // Intentar con ruc.siscotic.com.py como alternativa
-    const resp2 = await fetch(`https://ruc.siscotic.com.py/api/contribuyente/${ruc}`, {
-      headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (resp2.ok) {
-      const data2 = await resp2.json();
-      return res.status(200).json({
-        ruc: data2.ruc || ruc,
-        nombre: data2.razonSocial || data2.nombre || "",
-        estado: data2.estado || "DESCONOCIDO",
-        fuente: "siscotic"
-      });
-    }
-
-    return res.status(404).json({ error: "RUC no encontrado" });
-
-  } catch (error) {
-    return res.status(500).json({ error: "Error consultando RUC: " + error.message });
   }
+
+  // Si ninguna fuente respondió
+  return res.status(404).json({
+    error: "No se encontró el contribuyente. Ingresá el nombre manualmente.",
+    ruc: rucLimpio,
+  });
 }
