@@ -72,23 +72,40 @@ export default function App() {
     actualizarCliente(c); setPeriodoActivo(p);
   }
 
-  // ── Buscar RUC automáticamente ──
+  // ── Buscar RUC automáticamente (directo desde el navegador) ──
   async function buscarRUC(ruc) {
-    if (!ruc || ruc.length < 4) return;
+    if (!ruc || ruc.length < 3) return;
     setLoadingRUC(true);
-    try {
-      const rucLimpio = ruc.replace(/\D/g, "");
-      const resp = await fetch(`/api/buscar-ruc?ruc=${rucLimpio}`);
-      if (resp.ok) {
+    setError(""); setSuccess("");
+    const rucLimpio = ruc.replace(/\D/g, "").trim();
+
+    // Lista de intentos
+    const intentos = [
+      () => fetch(`https://turuc.com.py/api/contribuyente/${rucLimpio}`, { headers:{"Accept":"application/json"}, signal: AbortSignal.timeout(6000) }),
+      () => fetch(`https://turuc.com.py/api/contribuyente/search?q=${rucLimpio}`, { headers:{"Accept":"application/json"}, signal: AbortSignal.timeout(6000) }),
+      () => fetch(`https://ruc.siscotic.com.py/api/contribuyente/${rucLimpio}`, { headers:{"Accept":"application/json"}, signal: AbortSignal.timeout(6000) }),
+    ];
+
+    let encontrado = false;
+    for (const intento of intentos) {
+      try {
+        const resp = await intento();
+        if (!resp.ok) continue;
         const data = await resp.json();
-        if (data.nombre) {
-          setFormCliente(p => ({ ...p, nombre: data.nombre, rucSinDV: rucLimpio }));
-          setSuccess(`✅ Contribuyente encontrado: ${data.nombre} | Estado: ${data.estado}`);
-        }
-      } else {
-        setSuccess("");
-      }
-    } catch { }
+        const item = Array.isArray(data) ? data[0] : data;
+        if (!item) continue;
+        const nombre = item.razonSocial || item.nombreFantasia || item.nombre || item.razon_social || "";
+        if (!nombre) continue;
+        setFormCliente(p => ({ ...p, nombre: nombre.toUpperCase().trim(), rucSinDV: rucLimpio }));
+        setSuccess(`✅ ${nombre.toUpperCase()} | Estado: ${item.estado || "ACTIVO"}`);
+        encontrado = true;
+        break;
+      } catch { continue; }
+    }
+
+    if (!encontrado) {
+      setError("⚠️ RUC no encontrado en DNIT. Podés ingresar el nombre manualmente.");
+    }
     setLoadingRUC(false);
   }
 
