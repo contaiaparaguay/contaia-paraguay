@@ -1,7 +1,7 @@
 {
   "name": "contaia-paraguay",
-  "version": "1.0.0",
-  "description": "ContaIA Paraguay - Tu contabilidad inteligente con IA",
+  "version": "2.0.0",
+  "description": "ContaIA Paraguay - Sistema contable con IA",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,6 +10,8 @@
   "dependencies": {
     "next": "14.0.0",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1"
   }
 }
