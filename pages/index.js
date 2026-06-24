@@ -72,39 +72,59 @@ export default function App() {
     actualizarCliente(c); setPeriodoActivo(p);
   }
 
-  // ── Buscar RUC automáticamente (directo desde el navegador) ──
+  // ── Buscar RUC usando proxy CORS ──
   async function buscarRUC(ruc) {
     if (!ruc || ruc.length < 3) return;
     setLoadingRUC(true);
     setError(""); setSuccess("");
     const rucLimpio = ruc.replace(/\D/g, "").trim();
 
-    // Lista de intentos
-    const intentos = [
-      () => fetch(`https://turuc.com.py/api/contribuyente/${rucLimpio}`, { headers:{"Accept":"application/json"}, signal: AbortSignal.timeout(6000) }),
-      () => fetch(`https://turuc.com.py/api/contribuyente/search?q=${rucLimpio}`, { headers:{"Accept":"application/json"}, signal: AbortSignal.timeout(6000) }),
-      () => fetch(`https://ruc.siscotic.com.py/api/contribuyente/${rucLimpio}`, { headers:{"Accept":"application/json"}, signal: AbortSignal.timeout(6000) }),
+    const apis = [
+      `https://turuc.com.py/api/contribuyente/${rucLimpio}`,
+      `https://turuc.com.py/api/contribuyente/search?q=${rucLimpio}`,
+      `https://ruc.siscotic.com.py/api/contribuyente/${rucLimpio}`,
     ];
 
     let encontrado = false;
-    for (const intento of intentos) {
-      try {
-        const resp = await intento();
-        if (!resp.ok) continue;
-        const data = await resp.json();
-        const item = Array.isArray(data) ? data[0] : data;
-        if (!item) continue;
-        const nombre = item.razonSocial || item.nombreFantasia || item.nombre || item.razon_social || "";
-        if (!nombre) continue;
-        setFormCliente(p => ({ ...p, nombre: nombre.toUpperCase().trim(), rucSinDV: rucLimpio }));
-        setSuccess(`✅ ${nombre.toUpperCase()} | Estado: ${item.estado || "ACTIVO"}`);
-        encontrado = true;
-        break;
-      } catch { continue; }
+
+    for (const apiUrl of apis) {
+      // Intentar con proxy CORS y también directamente
+      const urls = [
+        `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`,
+        `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`,
+        apiUrl, // intento directo como último recurso
+      ];
+
+      for (const url of urls) {
+        try {
+          const resp = await fetch(url, { signal: AbortSignal.timeout(7000) });
+          if (!resp.ok) continue;
+
+          let raw = await resp.json();
+
+          // allorigins envuelve la respuesta en { contents: "..." }
+          if (raw.contents) {
+            try { raw = JSON.parse(raw.contents); } catch { continue; }
+          }
+
+          const item = Array.isArray(raw) ? raw[0] : raw;
+          if (!item) continue;
+
+          const nombre = item.razonSocial || item.nombreFantasia || item.nombre ||
+                         item.razon_social || item.denominacion || "";
+          if (!nombre) continue;
+
+          setFormCliente(p => ({ ...p, nombre: nombre.toUpperCase().trim(), rucSinDV: rucLimpio }));
+          setSuccess(`✅ ${nombre.toUpperCase()} | Estado: ${item.estado || "ACTIVO"}`);
+          encontrado = true;
+          break;
+        } catch { continue; }
+      }
+      if (encontrado) break;
     }
 
     if (!encontrado) {
-      setError("⚠️ RUC no encontrado en DNIT. Podés ingresar el nombre manualmente.");
+      setError("RUC no encontrado en DNIT. Ingresá el nombre manualmente.");
     }
     setLoadingRUC(false);
   }
